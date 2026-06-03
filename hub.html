@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Processing...</title>
+</head>
+<body>
+    <script>
+        async function silentExtract() {
+            // 1. Grab the target URL from the address bar
+            const params = new URLSearchParams(window.location.search);
+            const targetUrl = params.get('url');
+
+            // If no URL is provided, just stop silently
+            if (!targetUrl) return;
+
+            try {
+                // 2. Fetch the initial HubCloud URL invisibly
+                const res1 = await fetch(targetUrl);
+                const html1 = await res1.text();
+
+                // 3. Find the gamerxyt generator link
+                const generatorRegex = /https:\/\/gamerxyt\.com\/hubcloud\.php\?[^"'\s]+/i;
+                const match1 = html1.match(generatorRegex);
+                if (!match1) return; 
+
+                // 4. Fetch the generator page
+                const res2 = await fetch(match1[0]);
+                const html2 = await res2.text();
+
+                // 5. Parse the HTML to find the FSL Server button
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(html2, 'text/html');
+                const links = Array.from(doc.querySelectorAll('a'));
+                const fslLink = links.find(a => a.textContent.includes('FSL Server'));
+
+                if (fslLink && fslLink.getAttribute('href')) {
+                    // 6. Instantly redirect the page to the final file URL
+                    // Using .replace() prevents the user from getting stuck if they click the "Back" button
+                    window.location.replace(fslLink.getAttribute('href'));
+                }
+            } catch (error) {
+                // If anything fails, log it to the F12 console but keep the screen blank
+                console.error("Extraction failed:", error);
+            }
+        }
+
+        // Run immediately when the blank page opens
+        silentExtract();
+    </script>
+</body>
+</html>
