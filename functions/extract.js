@@ -10,41 +10,33 @@ export async function onRequest(context) {
         });
     }
 
-    // Optimized proxy gateways. 
-    // CHANGED: Switched allorigins to /raw so it returns pure text instantly without JSON overhead.
+    // Server-side compatible proxy gateways taken from your bypass network
     const corsProxies = [
-        'https://api.allorigins.win/raw?url=',
+        'https://api.allorigins.win/get?url=',
         'https://api.codetabs.com/v1/proxy?quest='
     ];
 
-    // Speed-optimized proxy engine with an aggressive failover timeout
+    // Backend network scraper engine
     async function proxyFetch(target) {
         for (let proxy of corsProxies) {
-            const controller = new AbortController();
-            // If a public proxy doesn't respond in 3.5 seconds, abort and skip to the next one
-            const timeoutId = setTimeout(() => controller.abort(), 3500); 
-
             try {
                 const proxyUrl = `${proxy}${encodeURIComponent(target)}`;
                 const res = await fetch(proxyUrl, {
-                    signal: controller.signal,
-                    headers: { 
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
-                    }
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
                 });
-                
-                clearTimeout(timeoutId);
-
                 if (!res.ok) continue;
 
-                // Both endpoints now return raw HTML text directly, saving CPU cycles and network lag
-                return await res.text();
+                if (proxy.includes('allorigins.win')) {
+                    const data = await res.json();
+                    return data.contents;
+                } else {
+                    return await res.text();
+                }
             } catch (e) {
-                clearTimeout(timeoutId);
-                // Route failed or timed out; automatically jumps to the next proxy line item
+                // Route fails, fallback to next proxy automatically
             }
         }
-        throw new Error("All proxy network pathways are exhausted or timed out.");
+        throw new Error("All proxy network pathways are exhausted.");
     }
 
     try {
@@ -123,7 +115,8 @@ export async function onRequest(context) {
             throw new Error("Direct high-speed streaming link could not be isolated.");
         }
 
-        // 6. Issue a solid HTTP 302 Redirect response straight to the video stream
+        // 6. Issue a solid HTTP 302 Redirect response
+        // This forces any video player engine to instantly follow the link straight to the stream
         return Response.redirect(finalStreamUrl, 302);
 
     } catch (error) {
