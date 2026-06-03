@@ -112,10 +112,11 @@ export async function onRequest(context) {
             }
         }
 
-        // FIX: Structural backup filter restricted strictly to anchor tags.
-        // [^<]* ensures it stops looking if it encounters another HTML tag, preventing CSS leakages.
+        // FIX: Structural backup filter rewrite
+        // Forces the match to begin with a legitimate anchor tag link (<a href=...)
+        // Uses (?!<\/a>) to allow button icons (<i>) without escaping out into other elements on the page.
         if (!finalStreamUrl) {
-            const structuralMatch = html2.match(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>[^<]*FSL Server/i);
+            const structuralMatch = html2.match(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>(?:(?!<\/a>)[\s\S])*?FSL Server/i);
             if (structuralMatch) finalStreamUrl = structuralMatch[1];
         }
 
