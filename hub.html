@@ -1,51 +1,63 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Processing...</title>
+    <title>Downloading...</title>
 </head>
-<body>
+<body style="margin:0; padding:0; background:transparent;">
+
     <script>
-        async function silentExtract() {
-            // 1. Grab the target URL from the address bar
+        async function silentExtractor() {
             const params = new URLSearchParams(window.location.search);
             const targetUrl = params.get('url');
 
-            // If no URL is provided, just stop silently
             if (!targetUrl) return;
 
             try {
-                // 2. Fetch the initial HubCloud URL invisibly
+                // Step 1: Fetch initial page using your browser IP
                 const res1 = await fetch(targetUrl);
                 const html1 = await res1.text();
 
-                // 3. Find the gamerxyt generator link
+                // Step 2: Extract the generator link
                 const generatorRegex = /https:\/\/gamerxyt\.com\/hubcloud\.php\?[^"'\s]+/i;
                 const match1 = html1.match(generatorRegex);
-                if (!match1) return; 
+                if (!match1) return;
 
-                // 4. Fetch the generator page
+                // Step 3: Fetch the generator page
                 const res2 = await fetch(match1[0]);
                 const html2 = await res2.text();
 
-                // 5. Parse the HTML to find the FSL Server button
+                // Step 4: Parse out the final FSL Server download link
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html2, 'text/html');
                 const links = Array.from(doc.querySelectorAll('a'));
                 const fslLink = links.find(a => a.textContent.includes('FSL Server'));
 
                 if (fslLink && fslLink.getAttribute('href')) {
-                    // 6. Instantly redirect the page to the final file URL
-                    // Using .replace() prevents the user from getting stuck if they click the "Back" button
-                    window.location.replace(fslLink.getAttribute('href'));
+                    const finalDownloadUrl = fslLink.getAttribute('href');
+                    
+                    // Step 5: Trigger the download using a hidden background frame
+                    // This prevents the address bar from getting locked onto a white page
+                    const iframe = document.createElement('iframe');
+                    iframe.style.display = 'none';
+                    iframe.src = finalDownloadUrl;
+                    document.body.appendChild(iframe);
+
+                    // Step 6: Instantly bounce the user back to where they came from
+                    setTimeout(() => {
+                        if (window.history.length > 1) {
+                            window.history.back(); // Returns you to your original webpage instantly
+                        } else {
+                            window.close(); // Closes the tab automatically if opened as a new tab
+                        }
+                    }, 300);
                 }
             } catch (error) {
-                // If anything fails, log it to the F12 console but keep the screen blank
-                console.error("Extraction failed:", error);
+                console.error("Silent extraction failed:", error);
             }
         }
 
-        // Run immediately when the blank page opens
-        silentExtract();
+        // Run instantly
+        silentExtractor();
     </script>
 </body>
 </html>
