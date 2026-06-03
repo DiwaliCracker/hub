@@ -100,9 +100,22 @@ export async function onRequest(context) {
         }
 
         // Clean any HTML entities like &amp; out of the URL
-        const gatewayUrl = tenGbpsMatch[1].replace(/&amp;/g, '&'); 
+        let gatewayUrl = tenGbpsMatch[1].replace(/&amp;/g, '&'); 
 
-        // 6. Redirect directly to the 10Gbps gateway page
+        // 6. Strip the gamerxyt wrapper if it exists to get the raw Google URL
+        if (gatewayUrl.includes("gamerxyt.com/dl.php?link=")) {
+            // Split at 'link=' and take everything after it
+            gatewayUrl = gatewayUrl.split("link=")[1];
+            
+            // Safely decode in case the URL was encoded (e.g., %3A instead of :)
+            try {
+                gatewayUrl = decodeURIComponent(gatewayUrl);
+            } catch (e) {
+                // If decoding fails, just use the raw string
+            }
+        }
+
+        // 7. Redirect straight to the final extracted stream
         return Response.redirect(gatewayUrl, 302);
 
     } catch (error) {
