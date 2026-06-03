@@ -10,37 +10,52 @@ export async function onRequest(context) {
         });
     }
 
-    // Proxy gateways used to bypass environment blocks
-    const corsProxies = [
-        'https://api.allorigins.win/raw?url=',
-        'https://api.codetabs.com/v1/proxy?quest='
+    // Smart Proxy Arsenal: Starts with direct fetch, then cascades through proxies
+    const proxyList = [
+        '', // DIRECT FETCH: Try without a proxy first (fastest)
+        'https://corsproxy.io/?',
+        'https://api.codetabs.com/v1/proxy?quest=',
+        'https://api.allorigins.win/raw?url='
     ];
 
-    // Speed-optimized proxy engine with safety timeout
-    async function proxyFetch(target) {
-        for (let proxy of corsProxies) {
+    // Upgraded fetch engine with advanced error/captcha handling
+    async function smartFetch(target) {
+        for (let proxy of proxyList) {
             const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 3500); 
+            // Increased timeout to 6 seconds. Free proxies are heavily loaded and slow.
+            const timeoutId = setTimeout(() => controller.abort(), 6000); 
 
             try {
-                const proxyUrl = `${proxy}${encodeURIComponent(target)}`;
-                const res = await fetch(proxyUrl, {
+                const fetchUrl = proxy === '' ? target : `${proxy}${encodeURIComponent(target)}`;
+                
+                const res = await fetch(fetchUrl, {
                     signal: controller.signal,
                     headers: { 
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5'
                     }
                 });
                 
                 clearTimeout(timeoutId);
-                if (!res.ok) continue;
+                
+                // If it throws a 403/500 network error, skip to next proxy
+                if (!res.ok) continue; 
 
-                return await res.text();
+                const text = await res.text();
+                
+                // Security verification: Skip this proxy if it hit a Cloudflare anti-bot page
+                if (!text || text.includes('<title>Just a moment...</title>') || text.includes('cf-browser-verification')) {
+                    continue;
+                }
+
+                return text;
             } catch (e) {
                 clearTimeout(timeoutId);
-                // Failover seamlessly to next proxy
+                // Failover seamlessly to next route on timeout or network block
             }
         }
-        throw new Error("All proxy network pathways are exhausted or timed out.");
+        throw new Error("Network block: Direct fetch failed and all proxy fallback pathways are exhausted.");
     }
 
     try {
@@ -51,7 +66,7 @@ export async function onRequest(context) {
         }
 
         // 2. Extract layout content from the primary landing page
-        const html1 = await proxyFetch(cleanUrl);
+        const html1 = await smartFetch(cleanUrl);
 
         // 3. Match the intermediate hubcloud.php redirection pathway
         const downloadRegex = /href=["']([^"']+)["'][^>]*id=["']download["']/i;
@@ -78,7 +93,7 @@ export async function onRequest(context) {
         }
 
         // 4. Fetch the final token page
-        const html2 = await proxyFetch(hubcloudPhpUrl);
+        const html2 = await smartFetch(hubcloudPhpUrl);
 
         // 5. Look explicitly for the "Server : 10Gbps" button link
         const tenGbpsRegex = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>(?:(?!<\/a>)[\s\S])*?Server\s*:\s*10Gbps/i;
@@ -94,7 +109,7 @@ export async function onRequest(context) {
         // 6. Aggressive extraction of the Google stream URL
         let finalStreamUrl = null;
         
-        // This regex matches the exact Google User Content domain and the massive token path
+        // This regex matches the exact Google User Content domain and the token path
         const googleRegex = /(https:\/\/video-downloads\.googleusercontent\.com\/[a-zA-Z0-9_\-\.\~]+)/i;
 
         // Helper function to decode and rip the Google URL out of a gamerxyt wrapper string
@@ -118,7 +133,7 @@ export async function onRequest(context) {
 
         // Check 2: If not, fetch the gateway page and scan the HTML
         if (!finalStreamUrl) {
-            const html3 = await proxyFetch(gatewayUrl);
+            const html3 = await smartFetch(gatewayUrl);
 
             // Strategy A: The raw video-downloads link is sitting somewhere on the page
             const rawMatch = html3.match(googleRegex);
@@ -136,7 +151,7 @@ export async function onRequest(context) {
         }
 
         if (!finalStreamUrl) {
-            throw new Error("Successfully hit the 10Gbps gateway, but could not extract the final Google stream URL. The layout may be hidden differently.");
+            throw new Error("Successfully hit the 10Gbps gateway, but could not extract the final Google stream URL.");
         }
 
         // 7. Perform standard 302 stream redirection straight to the high-speed Google server
