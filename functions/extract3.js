@@ -81,7 +81,6 @@ export async function onRequest(context) {
         const html2 = await proxyFetch(hubcloudPhpUrl);
 
         // 5. Look explicitly for the "Server : 10Gbps" button link
-        // This regex ensures it stops at the exact anchor tag matching your target
         const tenGbpsRegex = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>(?:(?!<\/a>)[\s\S])*?Server\s*:\s*10Gbps/i;
         const tenGbpsMatch = html2.match(tenGbpsRegex);
 
@@ -89,33 +88,55 @@ export async function onRequest(context) {
             throw new Error("The 'Server : 10Gbps' button could not be found on this page.");
         }
 
-        const gatewayUrl = tenGbpsMatch[1]; // e.g., https://gpdl.hubcloud.cx/?id=...
+        // Clean any HTML entities like &amp; out of the URL
+        const gatewayUrl = tenGbpsMatch[1].replace(/&amp;/g, '&'); 
 
-        // 6. Fetch the 10Gbps gateway page to grab the underlying Google user content link
-        const html3 = await proxyFetch(gatewayUrl);
-
+        // 6. Aggressive extraction of the Google stream URL
         let finalStreamUrl = null;
-
-        // This powerful regex hunts down the video-downloads.googleusercontent.com link 
-        // whether it's floating freely in the HTML, embedded in a meta-refresh, 
-        // or attached as a parameter to the gamerxyt.com URL.
-        const googleRegex = /(https:\/\/video-downloads\.googleusercontent\.com\/[^"'\s<>]+)/i;
-        const googleMatch = html3.match(googleRegex);
-
-        if (googleMatch) {
-            finalStreamUrl = googleMatch[1];
-        } 
         
-        // Failsafe: Just in case the gateway URL instantly gave us the gamerxyt link without loading a page
-        if (!finalStreamUrl && gatewayUrl.includes("gamerxyt.com/dl.php?link=")) {
-            const extractedLink = gatewayUrl.split("link=")[1];
-            if (extractedLink.includes("video-downloads")) {
-                finalStreamUrl = decodeURIComponent(extractedLink);
+        // This regex matches the exact Google User Content domain and the massive token path
+        const googleRegex = /(https:\/\/video-downloads\.googleusercontent\.com\/[a-zA-Z0-9_\-\.\~]+)/i;
+
+        // Helper function to decode and rip the Google URL out of a gamerxyt wrapper string
+        function ripGoogleLinkFromUrl(urlStr) {
+            if (!urlStr) return null;
+            if (urlStr.includes('link=')) {
+                try {
+                    const extracted = urlStr.split('link=')[1];
+                    const decoded = decodeURIComponent(extracted);
+                    const match = decoded.match(googleRegex);
+                    if (match) return match[1];
+                } catch (e) {
+                    // Ignore decoding errors and fallback to null
+                }
+            }
+            return null;
+        }
+
+        // Check 1: Is the gateway URL itself already the gamerxyt link?
+        finalStreamUrl = ripGoogleLinkFromUrl(gatewayUrl);
+
+        // Check 2: If not, fetch the gateway page and scan the HTML
+        if (!finalStreamUrl) {
+            const html3 = await proxyFetch(gatewayUrl);
+
+            // Strategy A: The raw video-downloads link is sitting somewhere on the page
+            const rawMatch = html3.match(googleRegex);
+            if (rawMatch) {
+                finalStreamUrl = rawMatch[1];
+            } 
+            // Strategy B: The gamerxyt link is sitting somewhere on the page
+            else {
+                const gamerxytRegex = /(https:\/\/gamerxyt\.com\/dl\.php\?link=[^"'\s<>]+)/i;
+                const gamerMatch = html3.match(gamerxytRegex);
+                if (gamerMatch) {
+                    finalStreamUrl = ripGoogleLinkFromUrl(gamerMatch[1]);
+                }
             }
         }
 
         if (!finalStreamUrl) {
-            throw new Error("Successfully hit the 10Gbps gateway, but could not extract the final Google stream URL.");
+            throw new Error("Successfully hit the 10Gbps gateway, but could not extract the final Google stream URL. The layout may be hidden differently.");
         }
 
         // 7. Perform standard 302 stream redirection straight to the high-speed Google server
