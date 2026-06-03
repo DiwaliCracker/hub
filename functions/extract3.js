@@ -5,92 +5,129 @@ export async function onRequest(context) {
 
     if (!targetUrl) {
         return new Response('Error: Missing url parameter', { 
-            status: 400, 
-            headers: { 'Access-Control-Allow-Origin': '*' } 
+            status: 400,
+            headers: { 'Access-Control-Allow-Origin': '*' }
         });
     }
 
-    // 1. Smart Fetch Engine: Tries reliable raw-text proxies first to avoid JSON crashes
-    async function smartFetch(target) {
-        const proxies = [
-            'https://api.codetabs.com/v1/proxy?quest=', // Returns raw text (Primary)
-            'https://thingproxy.freeboard.io/fetch/',   // Returns raw text (Backup 1)
-            'https://api.allorigins.win/get?url='       // JSON wrapper (Backup 2)
-        ];
+    // Proxy gateways used to bypass environment blocks
+    const corsProxies = [
+        'https://api.allorigins.win/raw?url=',
+        'https://api.codetabs.com/v1/proxy?quest='
+    ];
 
-        for (let proxy of proxies) {
+    // Speed-optimized proxy engine with safety timeout
+    async function proxyFetch(target) {
+        for (let proxy of corsProxies) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3500); 
+
             try {
                 const proxyUrl = `${proxy}${encodeURIComponent(target)}`;
                 const res = await fetch(proxyUrl, {
-                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                });
-
-                const rawText = await res.text();
-
-                // If the proxy returns a Cloudflare error (like 520), throw to trigger the next proxy
-                if (rawText.includes("error code: 520") || !res.ok) {
-                    throw new Error("Proxy connection dropped");
-                }
-
-                // If it's allorigins, safely parse the JSON. If it fails, it moves to the next proxy.
-                if (proxy.includes('allorigins.win')) {
-                    try {
-                        const data = JSON.parse(rawText);
-                        return data.contents;
-                    } catch (e) {
-                        throw new Error("Proxy returned invalid JSON");
+                    signal: controller.signal,
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36' 
                     }
-                }
+                });
+                
+                clearTimeout(timeoutId);
+                if (!res.ok) continue;
 
-                // For codetabs and thingproxy, just return the raw HTML string
-                return rawText;
+                return await res.text();
             } catch (e) {
-                // Silently catch and let the loop try the next proxy in the list
-                continue; 
+                clearTimeout(timeoutId);
+                // Failover seamlessly to next proxy
             }
         }
-        throw new Error("All proxies are currently blocked or returning errors.");
+        throw new Error("All proxy network pathways are exhausted or timed out.");
     }
 
     try {
-        // Step 1: Fetch primary layout safely
-        const html1 = await smartFetch(targetUrl);
-
-        // Step 2: Extract PHP generator link
-        const phpMatch = html1.match(/id=["']download["'][^>]*href=["']([^"']+)["']/i) || 
-                         html1.match(/href=["']([^"']+)["'][^>]*id=["']download["']/i);
-        
-        if (!phpMatch) throw new Error("Could not find the initial HubCloud download button.");
-        
-        let phpUrl = phpMatch[1];
-        if (phpUrl.startsWith('/')) {
-            phpUrl = new URL(targetUrl).origin + phpUrl;
+        // 1. Convert incoming mirror domain formats cleanly
+        let cleanUrl = targetUrl;
+        if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(targetUrl)) {
+            cleanUrl = `https://hubcloud.one/drive/${targetUrl.split("/").pop()}`;
         }
 
-        // Step 3: Fetch generator page (The page with the 10Gbps button)
-        const html2 = await smartFetch(phpUrl);
+        // 2. Extract layout content from the primary landing page
+        const html1 = await proxyFetch(cleanUrl);
 
-        // Step 4: Locate "Download [Server : 10Gbps]" link strictly
-        const server10GbpsRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[^<]*Download\s*\[Server\s*:\s*10Gbps\]/i;
-        const match = html2.match(server10GbpsRegex);
-        
-        if (!match) throw new Error("10Gbps Server button is missing from this page.");
-        let streamUrl = match[1];
+        // 3. Match the intermediate hubcloud.php redirection pathway
+        const downloadRegex = /href=["']([^"']+)["'][^>]*id=["']download["']/i;
+        const downloadRegexAlt = /id=["']download["'][^>]*href=["']([^"']+)["']/i;
+        const fallbackPhpRegex = /https:\/\/[^"'\s]+\/hubcloud\.php\?[^"'\s]+/i;
 
-        // Step 5: Clean the link if it is wrapped in dl.php
-        if (streamUrl.includes("dl.php")) {
-            const parsedUrl = new URL(streamUrl, 'https://gamerxyt.com');
-            const hiddenLink = parsedUrl.searchParams.get("link");
-            if (hiddenLink) streamUrl = hiddenLink;
+        let hubcloudPhpUrl = null;
+        let match1 = html1.match(downloadRegex) || html1.match(downloadRegexAlt);
+
+        if (match1) {
+            hubcloudPhpUrl = match1[1];
+        } else {
+            let matchFallback = html1.match(fallbackPhpRegex);
+            if (matchFallback) hubcloudPhpUrl = matchFallback[0];
         }
 
-        // Step 6: Instantly redirect the video player to the extracted stream
-        return Response.redirect(streamUrl, 302);
+        if (!hubcloudPhpUrl) {
+            throw new Error("Failed to parse generation path token.");
+        }
+
+        if (hubcloudPhpUrl.startsWith('/')) {
+            const baseUrl = new URL(cleanUrl);
+            hubcloudPhpUrl = `${baseUrl.origin}${hubcloudPhpUrl}`;
+        }
+
+        // 4. Fetch the final token page
+        const html2 = await proxyFetch(hubcloudPhpUrl);
+
+        // 5. Look explicitly for the "Server : 10Gbps" button link
+        // This regex ensures it stops at the exact anchor tag matching your target
+        const tenGbpsRegex = /<a\s+[^>]*href=["']([^"']+)["'][^>]*>(?:(?!<\/a>)[\s\S])*?Server\s*:\s*10Gbps/i;
+        const tenGbpsMatch = html2.match(tenGbpsRegex);
+
+        if (!tenGbpsMatch) {
+            throw new Error("The 'Server : 10Gbps' button could not be found on this page.");
+        }
+
+        const gatewayUrl = tenGbpsMatch[1]; // e.g., https://gpdl.hubcloud.cx/?id=...
+
+        // 6. Fetch the 10Gbps gateway page to grab the underlying Google user content link
+        const html3 = await proxyFetch(gatewayUrl);
+
+        let finalStreamUrl = null;
+
+        // This powerful regex hunts down the video-downloads.googleusercontent.com link 
+        // whether it's floating freely in the HTML, embedded in a meta-refresh, 
+        // or attached as a parameter to the gamerxyt.com URL.
+        const googleRegex = /(https:\/\/video-downloads\.googleusercontent\.com\/[^"'\s<>]+)/i;
+        const googleMatch = html3.match(googleRegex);
+
+        if (googleMatch) {
+            finalStreamUrl = googleMatch[1];
+        } 
+        
+        // Failsafe: Just in case the gateway URL instantly gave us the gamerxyt link without loading a page
+        if (!finalStreamUrl && gatewayUrl.includes("gamerxyt.com/dl.php?link=")) {
+            const extractedLink = gatewayUrl.split("link=")[1];
+            if (extractedLink.includes("video-downloads")) {
+                finalStreamUrl = decodeURIComponent(extractedLink);
+            }
+        }
+
+        if (!finalStreamUrl) {
+            throw new Error("Successfully hit the 10Gbps gateway, but could not extract the final Google stream URL.");
+        }
+
+        // 7. Perform standard 302 stream redirection straight to the high-speed Google server
+        return Response.redirect(finalStreamUrl, 302);
 
     } catch (error) {
         return new Response(`Stream Error: ${error.message}`, {
             status: 500,
-            headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' }
+            headers: { 
+                'Content-Type': 'text/plain',
+                'Access-Control-Allow-Origin': '*'
+            }
         });
     }
 }
