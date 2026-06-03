@@ -1,63 +1,126 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Downloading...</title>
+    <title>Processing...</title>
 </head>
 <body style="margin:0; padding:0; background:transparent;">
 
     <script>
-        async function silentExtractor() {
+        // The exact proxy network from your bypasser to permanently smash 403 blocks
+        const corsProxies = [
+            'https://api.allorigins.win/get?url=',
+            'https://thingproxy.freeboard.io/fetch/',
+            'https://api.codetabs.com/v1/proxy?quest='
+        ];
+
+        // Core network engine that cycles through proxies automatically if direct access fails
+        async function smartFetch(url) {
+            try {
+                const response = await fetch(url);
+                if (response.ok) return await response.text();
+            } catch (e) {
+                // Direct failed, cycle through the working proxies
+                for (let proxy of corsProxies) {
+                    try {
+                        const proxyUrl = `${proxy}${encodeURIComponent(url)}`;
+                        const response = await fetch(proxyUrl);
+                        if (!response.ok) continue;
+
+                        if (proxy.includes('allorigins.win')) {
+                            const data = await response.json();
+                            return data.contents;
+                        } else {
+                            return await response.text();
+                        }
+                    } catch (proxyError) {}
+                }
+            }
+            throw new Error("All routing pathways blocked.");
+        }
+
+        async function executeSilentBypass() {
             const params = new URLSearchParams(window.location.search);
             const targetUrl = params.get('url');
 
             if (!targetUrl) return;
 
             try {
-                // Step 1: Fetch initial page using your browser IP
-                const res1 = await fetch(targetUrl);
-                const html1 = await res1.text();
+                // Step 1: Fetch initial landing page source safely
+                let cleanUrl = targetUrl;
+                if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(targetUrl)) {
+                    cleanUrl = `https://hubcloud.one/drive/${targetUrl.split("/").pop()}`;
+                }
 
-                // Step 2: Extract the generator link
-                const generatorRegex = /https:\/\/gamerxyt\.com\/hubcloud\.php\?[^"'\s]+/i;
-                const match1 = html1.match(generatorRegex);
-                if (!match1) return;
-
-                // Step 3: Fetch the generator page
-                const res2 = await fetch(match1[0]);
-                const html2 = await res2.text();
-
-                // Step 4: Parse out the final FSL Server download link
+                const html1 = await smartFetch(cleanUrl);
+                
+                // Step 2: Use DOMParser to extract the primary hubcloud.php redirect button
                 const parser = new DOMParser();
-                const doc = parser.parseFromString(html2, 'text/html');
-                const links = Array.from(doc.querySelectorAll('a'));
-                const fslLink = links.find(a => a.textContent.includes('FSL Server'));
+                const doc1 = parser.parseFromString(html1, 'text/html');
+                const downloadBtn = doc1.getElementById('download');
+                
+                if (!downloadBtn || !downloadBtn.getAttribute('href')) return;
+                
+                let hubcloudPhpUrl = downloadBtn.getAttribute('href');
+                if (hubcloudPhpUrl.startsWith('/')) {
+                    const baseUrl = new URL(cleanUrl);
+                    hubcloudPhpUrl = `${baseUrl.origin}${hubcloudPhpUrl}`;
+                }
 
-                if (fslLink && fslLink.getAttribute('href')) {
-                    const finalDownloadUrl = fslLink.getAttribute('href');
-                    
-                    // Step 5: Trigger the download using a hidden background frame
-                    // This prevents the address bar from getting locked onto a white page
+                // Step 3: Fetch the underlying generation script landing page
+                const html2 = await smartFetch(hubcloudPhpUrl);
+                const doc2 = parser.parseFromString(html2, 'text/html');
+                const allLinks = Array.from(doc2.querySelectorAll('a'));
+
+                let finalDownloadUrl = null;
+
+                // Step 4: Scan anchor elements for direct media streams using your file's filters
+                for (const link of allLinks) {
+                    const href = link.getAttribute('href');
+                    if (!href) continue;
+
+                    if (
+                        href.includes("r2.dev") || 
+                        href.includes("cloudflare") || 
+                        href.includes("pixeldrain") || 
+                        href.includes("workers.dev") || 
+                        href.includes("googleusercontent") ||
+                        href.includes("obsession.buzz") || // Matches your exact example destination domain
+                        href.match(/\.(zip|rar|7z|mkv|mp4|avi|mov)$/i) ||
+                        link.textContent.includes('FSL Server')
+                    ) {
+                        if (href.includes("pixeldrain.com/u/")) {
+                            finalDownloadUrl = "https://pixeldrain.com/api/file/" + href.split("/u/").pop();
+                        } else {
+                            finalDownloadUrl = href;
+                        }
+                        break;
+                    }
+                }
+
+                // Step 5: If link is verified, trigger download silently and wipe the tracking state
+                if (finalDownloadUrl) {
                     const iframe = document.createElement('iframe');
                     iframe.style.display = 'none';
                     iframe.src = finalDownloadUrl;
                     document.body.appendChild(iframe);
 
-                    // Step 6: Instantly bounce the user back to where they came from
+                    // Step 6: Instantly reset browser viewport history
                     setTimeout(() => {
                         if (window.history.length > 1) {
-                            window.history.back(); // Returns you to your original webpage instantly
+                            window.history.back(); // Kick user directly back to the original layout page
                         } else {
-                            window.close(); // Closes the tab automatically if opened as a new tab
+                            window.close(); // Cleanly auto-destroys the browser tab if opened standalone
                         }
-                    }, 300);
+                    }, 500);
                 }
+
             } catch (error) {
-                console.error("Silent extraction failed:", error);
+                console.error("Silent extraction module failure:", error);
             }
         }
 
-        // Run instantly
-        silentExtractor();
+        // Run routine immediately upon layout request
+        executeSilentBypass();
     </script>
 </body>
 </html>
