@@ -22,7 +22,6 @@ export async function onRequest(context) {
     async function smartFetch(target) {
         for (let proxy of proxyList) {
             const controller = new AbortController();
-            // Increased timeout to 6 seconds. Free proxies are heavily loaded and slow.
             const timeoutId = setTimeout(() => controller.abort(), 6000); 
 
             try {
@@ -39,12 +38,10 @@ export async function onRequest(context) {
                 
                 clearTimeout(timeoutId);
                 
-                // If it throws a 403/500 network error, skip to next proxy
                 if (!res.ok) continue; 
 
                 const text = await res.text();
                 
-                // Security verification: Skip this proxy if it hit a Cloudflare anti-bot page
                 if (!text || text.includes('<title>Just a moment...</title>') || text.includes('cf-browser-verification')) {
                     continue;
                 }
@@ -52,7 +49,6 @@ export async function onRequest(context) {
                 return text;
             } catch (e) {
                 clearTimeout(timeoutId);
-                // Failover seamlessly to next route on timeout or network block
             }
         }
         throw new Error("Network block: Direct fetch failed and all proxy fallback pathways are exhausted.");
@@ -106,56 +102,8 @@ export async function onRequest(context) {
         // Clean any HTML entities like &amp; out of the URL
         const gatewayUrl = tenGbpsMatch[1].replace(/&amp;/g, '&'); 
 
-        // 6. Aggressive extraction of the Google stream URL
-        let finalStreamUrl = null;
-        
-        // This regex matches the exact Google User Content domain and the token path
-        const googleRegex = /(https:\/\/video-downloads\.googleusercontent\.com\/[a-zA-Z0-9_\-\.\~]+)/i;
-
-        // Helper function to decode and rip the Google URL out of a gamerxyt wrapper string
-        function ripGoogleLinkFromUrl(urlStr) {
-            if (!urlStr) return null;
-            if (urlStr.includes('link=')) {
-                try {
-                    const extracted = urlStr.split('link=')[1];
-                    const decoded = decodeURIComponent(extracted);
-                    const match = decoded.match(googleRegex);
-                    if (match) return match[1];
-                } catch (e) {
-                    // Ignore decoding errors and fallback to null
-                }
-            }
-            return null;
-        }
-
-        // Check 1: Is the gateway URL itself already the gamerxyt link?
-        finalStreamUrl = ripGoogleLinkFromUrl(gatewayUrl);
-
-        // Check 2: If not, fetch the gateway page and scan the HTML
-        if (!finalStreamUrl) {
-            const html3 = await smartFetch(gatewayUrl);
-
-            // Strategy A: The raw video-downloads link is sitting somewhere on the page
-            const rawMatch = html3.match(googleRegex);
-            if (rawMatch) {
-                finalStreamUrl = rawMatch[1];
-            } 
-            // Strategy B: The gamerxyt link is sitting somewhere on the page
-            else {
-                const gamerxytRegex = /(https:\/\/gamerxyt\.com\/dl\.php\?link=[^"'\s<>]+)/i;
-                const gamerMatch = html3.match(gamerxytRegex);
-                if (gamerMatch) {
-                    finalStreamUrl = ripGoogleLinkFromUrl(gamerMatch[1]);
-                }
-            }
-        }
-
-        if (!finalStreamUrl) {
-            throw new Error("Successfully hit the 10Gbps gateway, but could not extract the final Google stream URL.");
-        }
-
-        // 7. Perform standard 302 stream redirection straight to the high-speed Google server
-        return Response.redirect(finalStreamUrl, 302);
+        // 6. Redirect directly to the 10Gbps gateway page
+        return Response.redirect(gatewayUrl, 302);
 
     } catch (error) {
         return new Response(`Stream Error: ${error.message}`, {
