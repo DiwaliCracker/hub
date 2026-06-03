@@ -10,18 +10,16 @@ export async function onRequest(context) {
         });
     }
 
-    // Optimized proxy gateways. 
-    // CHANGED: Switched allorigins to /raw so it returns pure text instantly without JSON overhead.
+    // Proxy gateways used to bypass Hubcloud environment blocks
     const corsProxies = [
         'https://api.allorigins.win/raw?url=',
         'https://api.codetabs.com/v1/proxy?quest='
     ];
 
-    // Speed-optimized proxy engine with an aggressive failover timeout
+    // Speed-optimized proxy engine with a safety timeout failover
     async function proxyFetch(target) {
         for (let proxy of corsProxies) {
             const controller = new AbortController();
-            // If a public proxy doesn't respond in 3.5 seconds, abort and skip to the next one
             const timeoutId = setTimeout(() => controller.abort(), 3500); 
 
             try {
@@ -34,30 +32,28 @@ export async function onRequest(context) {
                 });
                 
                 clearTimeout(timeoutId);
-
                 if (!res.ok) continue;
 
-                // Both endpoints now return raw HTML text directly, saving CPU cycles and network lag
                 return await res.text();
             } catch (e) {
                 clearTimeout(timeoutId);
-                // Route failed or timed out; automatically jumps to the next proxy line item
+                // Failover seamlessly to next proxy if one hangs or errors
             }
         }
         throw new Error("All proxy network pathways are exhausted or timed out.");
     }
 
     try {
-        // 1. Process and convert incoming mirror URLs safely
+        // 1. Convert incoming mirror domain formats cleanly
         let cleanUrl = targetUrl;
         if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(targetUrl)) {
             cleanUrl = `https://hubcloud.one/drive/${targetUrl.split("/").pop()}`;
         }
 
-        // 2. Fetch primary landing layout via the proxy engine
+        // 2. Extract layout content from the landing page
         const html1 = await proxyFetch(cleanUrl);
 
-        // 3. Robust Regex pattern matching to extract the intermediate hubcloud.php link
+        // 3. Match the intermediate hubcloud.php redirection pathway
         const downloadRegex = /href=["']([^"']+)["'][^>]*id=["']download["']/i;
         const downloadRegexAlt = /id=["']download["'][^>]*href=["']([^"']+)["']/i;
         const fallbackPhpRegex = /https:\/\/[^"'\s]+\/hubcloud\.php\?[^"'\s]+/i;
@@ -81,7 +77,7 @@ export async function onRequest(context) {
             hubcloudPhpUrl = `${baseUrl.origin}${hubcloudPhpUrl}`;
         }
 
-        // 4. Fetch the token generation page content
+        // 4. Extract target data from the final token page
         const html2 = await proxyFetch(hubcloudPhpUrl);
 
         // 5. Scan anchors using your explicit extraction filters
@@ -95,6 +91,9 @@ export async function onRequest(context) {
         }
 
         for (const href of discoveredLinks) {
+            // Explicitly ignore stylesheets or scripts that sneak into parsing loops
+            if (href.endsWith('.css') || href.endsWith('.js')) continue;
+
             if (
                 href.includes("r2.dev") || 
                 href.includes("cloudflare") || 
@@ -113,9 +112,10 @@ export async function onRequest(context) {
             }
         }
 
-        // Structural backup filter checking text matching rules
+        // FIX: Structural backup filter restricted strictly to anchor tags.
+        // [^<]* ensures it stops looking if it encounters another HTML tag, preventing CSS leakages.
         if (!finalStreamUrl) {
-            const structuralMatch = html2.match(/href=["']([^"']+)["'][^>]*>[\s\S]*?FSL Server/i);
+            const structuralMatch = html2.match(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>[^<]*FSL Server/i);
             if (structuralMatch) finalStreamUrl = structuralMatch[1];
         }
 
@@ -123,7 +123,7 @@ export async function onRequest(context) {
             throw new Error("Direct high-speed streaming link could not be isolated.");
         }
 
-        // 6. Issue a solid HTTP 302 Redirect response straight to the video stream
+        // 6. Perform standard 302 stream redirection straight to video engine
         return Response.redirect(finalStreamUrl, 302);
 
     } catch (error) {
