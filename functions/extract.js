@@ -1,83 +1,131 @@
 export async function onRequest(context) {
-  const request = context.request;
-  const url = new URL(request.url);
-  const targetUrl = url.searchParams.get('url');
+    const request = context.request;
+    const url = new URL(request.url);
+    const targetUrl = url.searchParams.get('url');
 
-  // 1. Safety check for the parameter
-  if (!targetUrl) {
-    return new Response('Missing ?url= parameter', { status: 400 });
-  }
-
-  // Standard desktop browser profile to prevent firewalls from blocking Cloudflare
-  const baseHeaders = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'max-age=0'
-  };
-
-  try {
-    // STEP 1: Fetch the initial HubCloud landing page
-    const res1 = await fetch(targetUrl, { 
-      method: 'GET',
-      headers: baseHeaders 
-    });
-    
-    if (!res1.ok) {
-      throw new Error(`Step 1 (Hubcloud Landing) blocked: HTTP ${res1.status}`);
-    }
-    const html1 = await res1.text();
-
-    // Extract the gamerxyt generator link using Regex
-    const generatorRegex = /https:\/\/gamerxyt\.com\/hubcloud\.php\?[^"'\s]+/i;
-    const match1 = html1.match(generatorRegex);
-
-    if (!match1) {
-      throw new Error('Failed to parse the generation token from page source.');
+    if (!targetUrl) {
+        return new Response('Error: Missing url parameter', { 
+            status: 400,
+            headers: { 'Access-Control-Allow-Origin': '*' }
+        });
     }
 
-    const generatorUrl = match1[0];
+    // Server-side compatible proxy gateways taken from your bypass network
+    const corsProxies = [
+        'https://api.allorigins.win/get?url=',
+        'https://api.codetabs.com/v1/proxy?quest='
+    ];
 
-    // STEP 2: Fetch the generator page with dynamic Referer injection
-    const step2Headers = {
-      ...baseHeaders,
-      'Referer': targetUrl 
-    };
+    // Backend network scraper engine
+    async function proxyFetch(target) {
+        for (let proxy of corsProxies) {
+            try {
+                const proxyUrl = `${proxy}${encodeURIComponent(target)}`;
+                const res = await fetch(proxyUrl, {
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                });
+                if (!res.ok) continue;
 
-    const res2 = await fetch(generatorUrl, {
-      method: 'GET',
-      headers: step2Headers
-    });
-
-    if (!res2.ok) {
-      throw new Error(`Step 2 (Link Generator) blocked: HTTP ${res2.status}`);
-    }
-    const html2 = await res2.text();
-
-    // STEP 3: Find the FSL Server direct download link string
-    const linkRegex = /<a\s+(?:[^>]*?\s+)?href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-    let finalDownloadUrl = null;
-    let match;
-
-    while ((match = linkRegex.exec(html2)) !== null) {
-      if (match[2].includes('FSL Server')) {
-        finalDownloadUrl = match[1];
-        break; 
-      }
-    }
-
-    if (!finalDownloadUrl) {
-      throw new Error('FSL Server download path could not be found in final HTML payload.');
+                if (proxy.includes('allorigins.win')) {
+                    const data = await res.json();
+                    return data.contents;
+                } else {
+                    return await res.text();
+                }
+            } catch (e) {
+                // Route fails, fallback to next proxy automatically
+            }
+        }
+        throw new Error("All proxy network pathways are exhausted.");
     }
 
-    // STEP 4: Issue a clean 302 Redirect 
-    // This instantly forces the address bar to swap to the direct download link
-    return Response.redirect(finalDownloadUrl, 302);
+    try {
+        // 1. Process and convert incoming mirror URLs safely
+        let cleanUrl = targetUrl;
+        if (/^https:\/\/vifix\.site\/hubcloud\/([a-z0-9]+)$/i.test(targetUrl)) {
+            cleanUrl = `https://hubcloud.one/drive/${targetUrl.split("/").pop()}`;
+        }
 
-  } catch (error) {
-    return new Response(`Redirector Error: ${error.message}`, { 
-      status: 500,
-      headers: { 'Content-Type': 'text/plain' }
-    });
-  }
+        // 2. Fetch primary landing layout via the proxy engine
+        const html1 = await proxyFetch(cleanUrl);
+
+        // 3. Robust Regex pattern matching to extract the intermediate hubcloud.php link
+        const downloadRegex = /href=["']([^"']+)["'][^>]*id=["']download["']/i;
+        const downloadRegexAlt = /id=["']download["'][^>]*href=["']([^"']+)["']/i;
+        const fallbackPhpRegex = /https:\/\/[^"'\s]+\/hubcloud\.php\?[^"'\s]+/i;
+
+        let hubcloudPhpUrl = null;
+        let match1 = html1.match(downloadRegex) || html1.match(downloadRegexAlt);
+
+        if (match1) {
+            hubcloudPhpUrl = match1[1];
+        } else {
+            let matchFallback = html1.match(fallbackPhpRegex);
+            if (matchFallback) hubcloudPhpUrl = matchFallback[0];
+        }
+
+        if (!hubcloudPhpUrl) {
+            throw new Error("Failed to parse generation path token.");
+        }
+
+        if (hubcloudPhpUrl.startsWith('/')) {
+            const baseUrl = new URL(cleanUrl);
+            hubcloudPhpUrl = `${baseUrl.origin}${hubcloudPhpUrl}`;
+        }
+
+        // 4. Fetch the token generation page content
+        const html2 = await proxyFetch(hubcloudPhpUrl);
+
+        // 5. Scan anchors using your explicit extraction filters
+        const hrefPattern = /href=["']([^"']+)["']/gi;
+        let finalStreamUrl = null;
+        let currentMatch;
+        const discoveredLinks = [];
+
+        while ((currentMatch = hrefPattern.exec(html2)) !== null) {
+            discoveredLinks.push(currentMatch[1]);
+        }
+
+        for (const href of discoveredLinks) {
+            if (
+                href.includes("r2.dev") || 
+                href.includes("cloudflare") || 
+                href.includes("pixeldrain") || 
+                href.includes("workers.dev") || 
+                href.includes("googleusercontent") ||
+                href.includes("obsession.buzz") ||
+                href.match(/\.(zip|rar|7z|mkv|mp4|avi|mov)$/i)
+            ) {
+                if (href.includes("pixeldrain.com/u/")) {
+                    finalStreamUrl = "https://pixeldrain.com/api/file/" + href.split("/u/").pop();
+                } else {
+                    finalStreamUrl = href;
+                }
+                break;
+            }
+        }
+
+        // Structural backup filter checking text matching rules
+        if (!finalStreamUrl) {
+            const structuralMatch = html2.match(/href=["']([^"']+)["'][^>]*>[\s\S]*?FSL Server/i);
+            if (structuralMatch) finalStreamUrl = structuralMatch[1];
+        }
+
+        if (!finalStreamUrl) {
+            throw new Error("Direct high-speed streaming link could not be isolated.");
+        }
+
+        // 6. Issue a solid HTTP 302 Redirect response
+        // This forces any video player engine to instantly follow the link straight to the stream
+        return Response.redirect(finalStreamUrl, 302);
+
+    } catch (error) {
+        return new Response(`Stream Error: ${error.message}`, {
+            status: 500,
+            headers: { 
+                'Content-Type': 'text/plain',
+                'Access-Control-Allow-Origin': '*'
+            }
+        });
+    }
 }
