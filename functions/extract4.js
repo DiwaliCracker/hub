@@ -9,18 +9,28 @@ export async function onRequest(context) {
         });
     }
 
-    // A robust fetcher that tries direct connection first, then reliable proxies
+    // Delay function taken directly from your uploaded hubcloud.ts logic
+    const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+    // Aggressive proxy fetcher using raw endpoints to avoid JSON crashes completely
     async function smartFetch(fetchUrl, customHeaders = {}) {
         const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Upgrade-Insecure-Requests': '1',
             ...customHeaders
         };
 
+        // Upgraded proxy list using /raw endpoints
         const proxies = [
-            '', // 1. Try Direct fetch first
-            'https://corsproxy.io/?', // 2. High-speed raw text proxy
-            'https://api.codetabs.com/v1/proxy?quest=' // 3. Backup raw text proxy
+            '', // 1. Direct fetch attempt
+            'https://api.allorigins.win/raw?url=', // 2. Raw HTML return (No JSON)
+            'https://corsproxy.io/?', // 3. Backup CORS bypass
+            'https://api.codetabs.com/v1/proxy?quest=' // 4. Secondary backup
         ];
+
+        let lastError = "";
 
         for (let proxy of proxies) {
             try {
@@ -29,14 +39,21 @@ export async function onRequest(context) {
                 
                 if (res.ok) {
                     const text = await res.text();
-                    // If it's not a Cloudflare blocking page, return the HTML
-                    if (!text.includes('Just a moment...')) return text; 
+                    // Detect if Cloudflare intercepted the proxy request
+                    if (!text.includes('Just a moment...') && !text.includes('Enable JavaScript and cookies')) {
+                        return text; 
+                    } else {
+                        lastError = "Cloudflare CAPTCHA blocked the proxy.";
+                    }
+                } else {
+                    lastError = `Proxy returned HTTP ${res.status}`;
                 }
             } catch (e) {
+                lastError = e.message;
                 continue; // Move to the next proxy
             }
         }
-        throw new Error("Network gateways blocked the request.");
+        throw new Error(`Gateways blocked. Last reason: ${lastError}`);
     }
 
     try {
@@ -46,16 +63,13 @@ export async function onRequest(context) {
             cleanUrl = `https://hubcloud.one/drive/${targetUrl.split("/").pop()}`;
         }
 
-        const html1 = await smartFetch(cleanUrl, { 'Referer': cleanUrl });
+        let html1 = await smartFetch(cleanUrl, { 'Referer': cleanUrl });
 
-        // STEP 2: Apply REDIRECT_STRATEGIES from hubcloud.ts to find the Hop 2 link
+        // STEP 2: Extract Redirect URL (Hop 2)
         const redirectStrategies = [
             /var url\s*=\s*['"](.*?)['"]/,
             /window\.location(?:\.href)?\s*=\s*['"](.*?)['"]/,
-            /location\.replace\(['"](.*?)['"]\)/,
-            /<meta[^>]*http-equiv=["']?refresh["']?[^>]*content=["']?\d+;\s*url=(.*?)["']/i,
-            /location\.href\s*=\s*['"](.*?)['"]/,
-            /data-(?:url|href|link)\s*=\s*['"](.*?)['"]/
+            /location\.replace\(['"](.*?)['"]\)/
         ];
 
         let redirectUrl = null;
@@ -67,37 +81,49 @@ export async function onRequest(context) {
             }
         }
 
-        if (!redirectUrl) throw new Error("Hop 1 Redirect URL not found.");
+        if (!redirectUrl) throw new Error("Hop 1 Redirect URL not found. Page might be dead.");
         if (redirectUrl.startsWith('/')) {
             redirectUrl = new URL(cleanUrl).origin + redirectUrl;
         }
 
-        // STEP 3: Extract Anti-Bot Cookie from hubcloud.ts
+        // STEP 3: Extract Anti-Bot Cookie
         const cookieMatch = html1.match(/stck\(\s*['"](\w+)['"]\s*,/);
         const cookieHeader = cookieMatch ? { 'Cookie': `${cookieMatch[1]}=s4t` } : {};
 
         // STEP 4: Fetch Download Page (Hop 2)
-        const html2 = await smartFetch(redirectUrl, { 
+        let html2 = await smartFetch(redirectUrl, { 
             'Referer': cleanUrl, 
             ...cookieHeader 
         });
 
-        // STEP 5: Locate the specific "10Gbps" server link
+        // STEP 5: THE HUBCLOUD.TS RETRY LOGIC
+        // If the page doesn't contain our file sizes or download buttons, it's the fake "expired" page
+        if (!html2.includes('10Gbps') && !html2.includes('FSL')) {
+            // Wait exactly 2.5 seconds as dictated by the original source code
+            await delay(2500);
+            
+            // Re-fetch the generator link with the established cookie
+            html2 = await smartFetch(redirectUrl, { 
+                'Referer': cleanUrl, 
+                ...cookieHeader 
+            });
+        }
+
+        // STEP 6: Locate the specific "10Gbps" server link
         const server10GbpsRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>[\s\S]*?10Gbps/i;
         const match10g = html2.match(server10GbpsRegex);
         
-        if (!match10g) throw new Error("10Gbps Server button not found on page.");
+        if (!match10g) throw new Error("10Gbps Server button not found on final page.");
         let streamLink = match10g[1];
 
-        // STEP 6: Apply hubcdn extraction from hubcloudextractor.ts to get the Google URL
-        const html3 = await smartFetch(streamLink, { 'Referer': redirectUrl });
+        // STEP 7: Resolve the HubCDN / Google link
+        let html3 = await smartFetch(streamLink, { 'Referer': redirectUrl });
         let finalStreamUrl = null;
 
-        // Pattern 1: var reurl = "..."
+        // Extract from var reurl = "..."
         const reurlMatch = html3.match(/var\s+reurl\s*=\s*["']([^"']+)["']/);
         if (reurlMatch && reurlMatch[1]) {
             let reurl = reurlMatch[1];
-            
             if (reurl.includes('/dl/?link=')) {
                 finalStreamUrl = new URL(reurl, 'https://hubcdn.fans').searchParams.get('link');
             } else if (reurl.match(/[?&]r=([A-Za-z0-9+/=]+)/)) {
@@ -111,28 +137,22 @@ export async function onRequest(context) {
             }
         }
 
-        // Pattern 2: <a id="vd" href='URL'>
-        if (!finalStreamUrl) {
-            const vdMatch = html3.match(/<a\s+id=["']vd["']\s+href=["']([^"']+)["']/i);
-            if (vdMatch) finalStreamUrl = vdMatch[1];
-        }
-
-        // Pattern 3: Fallback straight to googleusercontent regex
+        // Fallback to direct googleusercontent regex
         if (!finalStreamUrl) {
             const gdriveMatch = html3.match(/(https?:\/\/[^\s"'<>]*googleusercontent\.com[^\s"'<>]*)/);
             if (gdriveMatch) finalStreamUrl = gdriveMatch[1];
         }
 
-        // Pattern 4: dl.php fallback check
+        // Strip dl.php wrapper if it exists
         if (finalStreamUrl && finalStreamUrl.includes("dl.php")) {
             const parsedDl = new URL(finalStreamUrl, 'https://gamerxyt.com');
             const hiddenLink = parsedDl.searchParams.get("link");
             if (hiddenLink) finalStreamUrl = hiddenLink;
         }
 
-        if (!finalStreamUrl) throw new Error("Final Googleusercontent stream could not be extracted.");
+        if (!finalStreamUrl) throw new Error("Googleusercontent stream could not be isolated.");
 
-        // STEP 7: Redirect player directly to the resolved stream
+        // Redirect player
         return Response.redirect(finalStreamUrl, 302);
 
     } catch (error) {
